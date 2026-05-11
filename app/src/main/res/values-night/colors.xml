@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary Colors for Dark Mode -->
+    <color name="primary">#FFD0BCFF</color>
+    <color name="on_primary">#FF381E72</color>
+    <color name="primary_container">#FF4F378B</color>
+    <color name="on_primary_container">#FFEEDCFF</color>
+
+    <color name="secondary">#FFCCC7DB</color>
+    <color name="on_secondary">#FF332D41</color>
+    <color name="secondary_container">#FF4A4458</color>
+    <color name="on_secondary_container">#FFEEDCFF</color>
+
+    <color name="tertiary">#FFEFB8E5</color>
+    <color name="on_tertiary">#FF492532</color>
+    <color name="tertiary_container">#FF633B48</color>
+    <color name="on_tertiary_container">#FFFFE0EB</color>
+
+    <!-- Camera UI Colors -->
+    <color name="camera_button_capture">#FF00BCD4</color>
+    <color name="camera_button_record">#FFFF5252</color>
+    <color name="camera_button_record_pulse">#FFFF1744</color>
+    <color name="camera_button_toggle">#FF00BCD4</color>
+    <color name="camera_overlay_background">#80000000</color>
+
+    <!-- Detection Colors -->
+    <color name="detection_object">#FF00E5FF</color>
+    <color name="detection_qr">#FF00E5FF</color>
+    <color name="detection_text_background">#90000000</color>
+
+    <!-- UI Elements -->
+    <color name="icon_color_primary">#FFFFFFFF</color>
+    <color name="background_dark">#FF1C1B1F</color>
+    <color name="surface_variant">#FF49454E</color>
+
+    <!-- Accent Colors -->
+    <color name="accent_cyan">#FF00BCD4</color>
+    <color name="accent_green">#FF4CAF50</color>
+    <color name="accent_red">#FFFF5252</color>
+</resources>
+

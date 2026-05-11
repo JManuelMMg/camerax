@@ -1,0 +1,45 @@
+<resources>
+    <string name="app_name">Camera Pro ML</string>
+
+    <!-- Camera Controls -->
+    <string name="capture">Capture</string>
+    <string name="record">Record</string>
+    <string name="stop">Stop</string>
+    <string name="flip_camera">Flip Camera</string>
+    <string name="toggle_photo_video">Toggle Photo/Video</string>
+    <string name="camera_mode">Camera Mode</string>
+    <string name="photo_mode">PHOTO</string>
+    <string name="video_mode">VIDEO</string>
+
+    <!-- Analysis Modes -->
+    <string name="qr_scan">QR Scan</string>
+    <string name="object_detection">Object Detection</string>
+    <string name="toggle_qr">Toggle QR Mode</string>
+    <string name="toggle_objects">Toggle Object Detection</string>
+    <string name="enable_ml_features">Enable ML Features</string>
+
+    <!-- Gallery & Preview -->
+    <string name="gallery_preview">Vista Previa</string>
+    <string name="back">Volver</string>
+    <string name="captured_image">Imagen capturada</string>
+    <string name="last_capture">Last Capture</string>
+
+    <!-- Messages -->
+    <string name="photo_saved">Photo saved: %s</string>
+    <string name="video_saved">Video saved: %s</string>
+    <string name="photo_capture_failed">Photo capture failed</string>
+    <string name="video_recording_failed">Video recording error</string>
+    <string name="recording">REC</string>
+
+    <!-- QR Detection -->
+    <string name="qr_detected">QR: %s</string>
+    <string name="no_qr_detected">No QR detected</string>
+
+    <!-- Object Detection -->
+    <string name="objects_detected" formatted="false">Detected: %d object%s</string>
+    <string name="object_label" formatted="false">%s (%.1f%%)</string>
+
+    <!-- Permissions -->
+    <string name="permission_camera">Camera</string>
+    <string name="permission_audio">Audio</string>
+</resources>
