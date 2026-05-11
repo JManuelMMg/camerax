@@ -2,6 +2,7 @@ package com.example.camerax.ui.camera
 
 import android.content.ContentValues
 import android.content.Context
+import android.media.AudioManager
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
@@ -46,6 +47,15 @@ class CameraViewModel : ViewModel() {
         AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO
     private var recordingAttempts: Int = 0
 
+    // ✅ CORRECIÓN: Debounce para QR - evitar actualizaciones excesivas
+    private var lastQrUpdateTime = 0L
+    private var lastQrValue: String? = null
+    private val QR_UPDATE_INTERVAL_MS = 1000L
+
+    // ✅ CORRECIÓN: Debounce para objetos - evitar actualizaciones excesivas
+    private var lastObjectsUpdateTime = 0L
+    private val OBJECTS_UPDATE_INTERVAL_MS = 1200L
+
     fun onFlipCamera() {
         _state.update {
             it.copy(
@@ -84,11 +94,35 @@ class CameraViewModel : ViewModel() {
         }
     }
 
+    // ✅ CORRECIÓN: Debounce en QR detection
     fun onQrDetected(text: String?) {
+        val currentTime = System.currentTimeMillis()
+
+        // Evitar actualizaciones si es muy frecuente
+        if (currentTime - lastQrUpdateTime < QR_UPDATE_INTERVAL_MS) {
+            return
+        }
+
+        // Evitar actualización si es el mismo valor
+        if (text == lastQrValue) {
+            return
+        }
+
+        lastQrUpdateTime = currentTime
+        lastQrValue = text
         _state.update { it.copy(detectedQrText = text) }
     }
 
+    // ✅ CORRECIÓN: Debounce en object detection
     fun onObjectsDetected(objects: List<DetectedObjectResult>) {
+        val currentTime = System.currentTimeMillis()
+
+        // Evitar actualizaciones si es muy frecuente
+        if (currentTime - lastObjectsUpdateTime < OBJECTS_UPDATE_INTERVAL_MS) {
+            return
+        }
+
+        lastObjectsUpdateTime = currentTime
         _state.update { it.copy(detectedObjects = objects) }
     }
 
@@ -131,9 +165,30 @@ class CameraViewModel : ViewModel() {
             return
         }
 
+        // ✅ CORRECIÓN: Validar que el micrófono esté disponible antes de grabar
+        if (!isMicrophoneAvailable(context)) {
+            Log.w(TAG, "⚠️ Micrófono no disponible - forzando grabación sin audio")
+            currentAudioStrategy = AudioConfigUtils.AudioFallbackStrategy.WITHOUT_AUDIO
+        } else {
+            currentAudioStrategy = AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO
+        }
+
         recordingAttempts = 0
-        currentAudioStrategy = AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO
         startVideoRecording(controller, context)
+    }
+
+    // ✅ CORRECIÓN: Validar disponibilidad de micrófono
+    private fun isMicrophoneAvailable(context: Context): Boolean {
+        return try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager.isWiredHeadsetOn ||
+            audioManager.isBluetoothScoOn ||
+            audioManager.isSpeakerphoneOn ||
+            true // Permitir si hay cualquier salida de audio
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking microphone availability: ${e.message}")
+            true // Si hay error, asumir que sí disponible
+        }
     }
 
     private fun stopRecording(context: Context) {

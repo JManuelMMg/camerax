@@ -112,6 +112,10 @@ fun CameraPreviewContent(
 
     var isCameraReady by remember { mutableStateOf(false) }
 
+    // ✅ CORRECIÓN: Guardar referencia a los analizadores para limpiarlos
+    var currentQrAnalyzer: QrCodeAnalyzer? by remember { mutableStateOf(null) }
+    var currentObjectAnalyzer: ObjectDetectionAnalyzer? by remember { mutableStateOf(null) }
+
     val controller = remember {
         LifecycleCameraController(context).apply {
             setEnabledUseCases(
@@ -142,23 +146,38 @@ fun CameraPreviewContent(
     }
 
     LaunchedEffect(state.isQrMode, state.isObjectDetectionEnabled) {
-        if (state.isQrMode) {
-            controller.setImageAnalysisAnalyzer(
-                ContextCompat.getMainExecutor(context),
-                QrCodeAnalyzer { viewModel.onQrDetected(it) }
-            )
-        } else if (state.isObjectDetectionEnabled) {
-            controller.setImageAnalysisAnalyzer(
-                ContextCompat.getMainExecutor(context),
-                ObjectDetectionAnalyzer { viewModel.onObjectsDetected(it) }
-            )
-        } else {
-            controller.clearImageAnalysisAnalyzer()
+        try {
+            // ✅ CORRECIÓN: Limpiar analizadores anteriores
+            currentQrAnalyzer?.release()
+            currentObjectAnalyzer?.release()
+
+            if (state.isQrMode) {
+                val qrAnalyzer = QrCodeAnalyzer { viewModel.onQrDetected(it) }
+                currentQrAnalyzer = qrAnalyzer
+                controller.setImageAnalysisAnalyzer(
+                    ContextCompat.getMainExecutor(context),
+                    qrAnalyzer
+                )
+            } else if (state.isObjectDetectionEnabled) {
+                val objectAnalyzer = ObjectDetectionAnalyzer { viewModel.onObjectsDetected(it) }
+                currentObjectAnalyzer = objectAnalyzer
+                controller.setImageAnalysisAnalyzer(
+                    ContextCompat.getMainExecutor(context),
+                    objectAnalyzer
+                )
+            } else {
+                controller.clearImageAnalysisAnalyzer()
+            }
+        } catch (e: Exception) {
+            Log.e("CameraScreen", "Error setting analyzer", e)
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            // ✅ CORRECIÓN: Limpiar recursos al salir
+            currentQrAnalyzer?.release()
+            currentObjectAnalyzer?.release()
             controller.unbind()
         }
     }

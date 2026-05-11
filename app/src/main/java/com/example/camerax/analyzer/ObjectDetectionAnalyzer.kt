@@ -8,9 +8,7 @@ import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.objects.ObjectDetection
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import java.util.concurrent.Executors
 
 data class DetectedObjectResult(
     val boundingBox: Rect,
@@ -28,28 +26,52 @@ class ObjectDetectionAnalyzer(
         .build()
 
     private val detector = ObjectDetection.getClient(options)
-    private val analyzerScope = CoroutineScope(Dispatchers.Default)
+    // ✅ CORRECIÓN: Single-threaded executor para evitar congelamiento
+    private val analysisExecutor = Executors.newSingleThreadExecutor()
+
+    // ✅ CORRECIÓN: Rate limiting - procesa solo 1 frame cada 800ms
+    private var lastAnalysisTime = 0L
+    private var lastDetectedObjects: List<DetectedObjectResult>? = null
+    private val ANALYSIS_INTERVAL_MS = 800L
 
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
-        analyzerScope.launch {
+        val currentTime = System.currentTimeMillis()
+
+        // ✅ CORRECIÓN: Throttle - saltar frames si procesamos muy frecuentemente
+        if (currentTime - lastAnalysisTime < ANALYSIS_INTERVAL_MS) {
+            imageProxy.close()
+            return
+        }
+
+        lastAnalysisTime = currentTime
+
+        analysisExecutor.execute {
             try {
                 val mediaImage = imageProxy.image
                 if (mediaImage != null) {
                     val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
                     detector.process(image)
                         .addOnSuccessListener { objects ->
-                            val results = objects.map { obj ->
-                                DetectedObjectResult(
-                                    boundingBox = obj.boundingBox,
-                                    label = obj.labels.firstOrNull()?.text ?: "Unknown",
-                                    confidence = obj.labels.firstOrNull()?.confidence ?: 0f
-                                )
+                            try {
+                                val results = objects.map { obj ->
+                                    DetectedObjectResult(
+                                        boundingBox = obj.boundingBox,
+                                        label = obj.labels.firstOrNull()?.text ?: "Unknown",
+                                        confidence = obj.labels.firstOrNull()?.confidence ?: 0f
+                                    )
+                                }
+                                // ✅ CORRECIÓN: Evitar actualización si los objetos no cambiaron significativamente
+                                if (shouldUpdateObjects(results)) {
+                                    lastDetectedObjects = results
+                                    onObjectsDetected(results)
+                                }
+                            } catch (e: Exception) {
+                                // Error silencioso
                             }
-                            onObjectsDetected(results)
                         }
-                        .addOnFailureListener {
-                            // Error silencioso
+                        .addOnFailureListener { _ ->
+                            // Error silencioso en procesamiento
                         }
                         .addOnCompleteListener {
                             imageProxy.close()
@@ -58,8 +80,29 @@ class ObjectDetectionAnalyzer(
                     imageProxy.close()
                 }
             } catch (e: Exception) {
-                imageProxy.close()
+                try {
+                    imageProxy.close()
+                } catch (_: Exception) {
+                    // Ya cerrado
+                }
             }
         }
+    }
+
+    // ✅ CORRECIÓN: Debounce - solo actualizar si hay cambios significativos
+    private fun shouldUpdateObjects(newResults: List<DetectedObjectResult>): Boolean {
+        if (lastDetectedObjects == null) return true
+        if (newResults.size != lastDetectedObjects?.size) return true
+
+        // Comparar si los objetos cambiaron significativamente
+        return newResults.zip(lastDetectedObjects!!).any { (new, old) ->
+            new.label != old.label ||
+            Math.abs(new.confidence - old.confidence) > 0.1f
+        }
+    }
+
+    fun release() {
+        analysisExecutor.shutdown()
+        detector.close()
     }
 }
