@@ -17,6 +17,7 @@ import androidx.camera.view.video.AudioConfig
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import com.example.camerax.analyzer.DetectedObjectResult
+import com.example.camerax.util.AudioConfig as AudioConfigUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +42,9 @@ class CameraViewModel : ViewModel() {
     val state: StateFlow<CameraState> = _state.asStateFlow()
 
     private var recording: Recording? = null
+    private var currentAudioStrategy: AudioConfigUtils.AudioFallbackStrategy =
+        AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO
+    private var recordingAttempts: Int = 0
 
     fun onFlipCamera() {
         _state.update {
@@ -123,16 +127,28 @@ class CameraViewModel : ViewModel() {
 
     fun recordVideo(controller: LifecycleCameraController, context: Context) {
         if (recording != null) {
-            try {
-                recording?.stop()
-                recording = null
-                _state.update { it.copy(isRecording = false) }
-            } catch (e: Exception) {
-                Log.e("CameraVM", "Error stopping recording: ${e.message}")
-            }
+            stopRecording(context)
             return
         }
 
+        recordingAttempts = 0
+        currentAudioStrategy = AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO
+        startVideoRecording(controller, context)
+    }
+
+    private fun stopRecording(context: Context) {
+        try {
+            recording?.stop()
+            recording = null
+            _state.update { it.copy(isRecording = false) }
+            Log.d(TAG, "Recording stopped successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping recording", e)
+            Toast.makeText(context, "❌ Error al detener grabación", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun startVideoRecording(controller: LifecycleCameraController, context: Context) {
         try {
             val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
             val contentValues = ContentValues().apply {
@@ -143,97 +159,212 @@ class CameraViewModel : ViewModel() {
                 }
             }
 
-            val mediaStoreOutputOptions = MediaStoreOutputOptions
+             val mediaStoreOutputOptions = MediaStoreOutputOptions
                 .Builder(context.contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
                 .setContentValues(contentValues)
                 .build()
 
-            Log.d("CameraVM", "Starting video recording with audio enabled...")
+            Log.d(TAG, "Iniciando grabación de video con estrategia: $currentAudioStrategy")
 
-            // Intentar grabar con audio, si falla, grabar sin audio
-            try {
-                recording = controller.startRecording(
-                    mediaStoreOutputOptions,
-                    AudioConfig.create(true),
-                    ContextCompat.getMainExecutor(context)
-                ) { event ->
-                    handleVideoRecordEvent(event, context, name)
-                }
-            } catch (audioException: Exception) {
-                Log.w("CameraVM", "Failed to record with audio, trying without audio: ${audioException.message}")
-                Log.d("CameraVM", "Starting video recording without audio...")
-                recording = controller.startRecording(
-                    mediaStoreOutputOptions,
-                    AudioConfig.create(false),
-                    ContextCompat.getMainExecutor(context)
-                ) { event ->
-                    handleVideoRecordEvent(event, context, name)
-                }
+            val audioConfigWithFallback = createAudioConfig(currentAudioStrategy)
+            recording = controller.startRecording(
+                mediaStoreOutputOptions,
+                audioConfigWithFallback,
+                ContextCompat.getMainExecutor(context)
+            ) { event ->
+                handleVideoRecordEvent(event, context, name, controller)
             }
 
             if (recording == null) {
-                Log.e("CameraVM", "Failed to start recording - got null")
-                Toast.makeText(context, "❌ No se pudo iniciar grabación", Toast.LENGTH_SHORT).show()
+                Log.e(TAG, "Recording iniciado pero retornó null")
+                Toast.makeText(context, "❌ Error: No se pudo iniciar grabación", Toast.LENGTH_SHORT).show()
+                handleRecordingFailure(context)
             }
         } catch (e: Exception) {
-            Log.e("CameraVM", "Exception during video recording: ${e.message}", e)
-            e.printStackTrace()
-            Toast.makeText(context, "❌ Error: ${e.message}", Toast.LENGTH_LONG).show()
+            Log.e(TAG, "Excepción durante inicio de grabación: ${e.message}", e)
+            handleRecordingException(e, context, controller)
         }
     }
 
-    private fun handleVideoRecordEvent(event: VideoRecordEvent, context: Context, name: String) {
+    private fun createAudioConfig(strategy: AudioConfigUtils.AudioFallbackStrategy): AudioConfig {
+        return when (strategy) {
+            AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO -> {
+                Log.d(TAG, "AudioConfig: Grabando CON AUDIO")
+                AudioConfig.create(true)
+            }
+            AudioConfigUtils.AudioFallbackStrategy.WITHOUT_AUDIO -> {
+                Log.d(TAG, "AudioConfig: Grabando SIN AUDIO - Fallback activo")
+                AudioConfig.create(false)
+            }
+            AudioConfigUtils.AudioFallbackStrategy.DISABLED -> {
+                Log.d(TAG, "AudioConfig: Audio COMPLETAMENTE DESHABILITADO")
+                AudioConfig.create(false)
+            }
+        }
+    }
+
+    private fun handleRecordingException(
+        exception: Exception,
+        context: Context,
+        controller: LifecycleCameraController
+    ) {
+        recordingAttempts++
+
+        val errorMessage = when {
+            recordingAttempts < AudioConfigUtils.MAX_RETRY_ATTEMPTS &&
+            currentAudioStrategy == AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO -> {
+                currentAudioStrategy = AudioConfigUtils.AudioFallbackStrategy.WITHOUT_AUDIO
+                Log.w(TAG, "Reintentando sin audio (intento $recordingAttempts/${AudioConfigUtils.MAX_RETRY_ATTEMPTS})")
+                Toast.makeText(context, "⚠️ Reinintentando sin audio...", Toast.LENGTH_SHORT).show()
+                startVideoRecording(controller, context)
+                return
+            }
+            else -> {
+                "No se pudo iniciar grabación: ${exception.message}"
+            }
+        }
+
+        Toast.makeText(context, "❌ $errorMessage", Toast.LENGTH_LONG).show()
+        handleRecordingFailure(context)
+    }
+
+    private fun handleRecordingFailure(context: Context) {
+        recording = null
+        _state.update { it.copy(isRecording = false) }
+        recordingAttempts = 0
+        currentAudioStrategy = AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO
+    }
+
+    private fun handleVideoRecordEvent(
+        event: VideoRecordEvent,
+        context: Context,
+        name: String,
+        controller: LifecycleCameraController
+    ) {
         when (event) {
             is VideoRecordEvent.Start -> {
                 _state.update { it.copy(isRecording = true) }
-                Log.d("CameraVM", "Recording started")
-                Toast.makeText(context, "🎥 Grabando...", Toast.LENGTH_SHORT).show()
+                recordingAttempts = 0
+                Log.d(TAG, "✅ Grabación iniciada con éxito")
+                val audioStatus = when (currentAudioStrategy) {
+                    AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO -> "con audio"
+                    AudioConfigUtils.AudioFallbackStrategy.WITHOUT_AUDIO -> "sin audio"
+                    AudioConfigUtils.AudioFallbackStrategy.DISABLED -> "audio deshabilitado"
+                }
+                Toast.makeText(context, "🎥 Grabando... ($audioStatus)", Toast.LENGTH_SHORT).show()
             }
+
             is VideoRecordEvent.Pause -> {
-                Log.d("CameraVM", "Recording paused")
+                Log.d(TAG, "⏸️ Grabación pausada")
             }
+
             is VideoRecordEvent.Resume -> {
-                Log.d("CameraVM", "Recording resumed")
+                Log.d(TAG, "▶️ Grabación reanudada")
             }
+
             is VideoRecordEvent.Finalize -> {
                 if (event.hasError()) {
-                    recording?.close()
-                    recording = null
-                    _state.update { it.copy(isRecording = false) }
-                    val errorCode = event.error
-                    Log.e("CameraVM", "Video recording error: $errorCode")
-                    Log.e("CameraVM", "Error cause: ${event.cause}")
-                    
-                    // Mapeo completo de códigos de error de CameraX
-                    val errorMessage = getErrorMessage(errorCode)
-                    Log.e("CameraVM", "Error Message: $errorMessage")
-                    
-                    Toast.makeText(context, "❌ Error: $errorMessage", Toast.LENGTH_LONG).show()
+                    handleVideoRecordingError(event, context, controller)
                 } else {
-                    val uri = event.outputResults.outputUri.toString()
-                    _state.update { it.copy(isRecording = false, lastCapturedUri = uri) }
-                    recording?.close()
-                    recording = null
-                    Toast.makeText(context, "🎥 Video guardado", Toast.LENGTH_SHORT).show()
-                    Log.d("CameraVM", "Video saved: $uri")
+                    handleVideoRecordingSuccess(event, context)
                 }
             }
+        }
+    }
+
+    private fun handleVideoRecordingError(
+        event: VideoRecordEvent.Finalize,
+        context: Context,
+        controller: LifecycleCameraController
+    ) {
+        recording?.close()
+        recording = null
+        _state.update { it.copy(isRecording = false) }
+
+        val errorCode = event.error
+        val errorMessage = getDetailedErrorMessage(errorCode, event.cause)
+
+        Log.e(TAG, "❌ Error de grabación: Código=$errorCode, Mensaje=$errorMessage")
+        Log.e(TAG, "Error causa: ${event.cause}")
+
+        // Estrategia de fallback para errores de audio/codec
+        if (errorCode == VIDEO_RECORD_ERROR_AUDIO_CODEC &&
+            currentAudioStrategy == AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO &&
+            recordingAttempts < AudioConfigUtils.MAX_RETRY_ATTEMPTS) {
+
+            Log.w(TAG, "Error de codec detectado - Reintentando sin audio...")
+            currentAudioStrategy = AudioConfigUtils.AudioFallbackStrategy.WITHOUT_AUDIO
+            recordingAttempts++
+            Toast.makeText(context, "⚠️ Error de codec de audio - Reintentando sin audio", Toast.LENGTH_LONG).show()
+            startVideoRecording(controller, context)
+        } else {
+            Toast.makeText(context, "❌ Error: $errorMessage", Toast.LENGTH_LONG).show()
+            handleRecordingFailure(context)
+        }
+    }
+
+    private fun handleVideoRecordingSuccess(
+        event: VideoRecordEvent.Finalize,
+        context: Context
+    ) {
+        try {
+            val uri = event.outputResults.outputUri.toString()
+            _state.update { it.copy(isRecording = false, lastCapturedUri = uri) }
+            recording?.close()
+            recording = null
+
+            val audioStatus = when (currentAudioStrategy) {
+                AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO -> "✅ Con audio"
+                AudioConfigUtils.AudioFallbackStrategy.WITHOUT_AUDIO -> "⚠️ Sin audio"
+                AudioConfigUtils.AudioFallbackStrategy.DISABLED -> "Audio deshabilitado"
+            }
+
+            Toast.makeText(context, "🎥 Video guardado ($audioStatus)", Toast.LENGTH_SHORT).show()
+            Log.d(TAG, "✅ Video guardado exitosamente: $uri")
+
+            handleRecordingFailure(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finalizando grabación: ${e.message}", e)
+            Toast.makeText(context, "❌ Error al guardar video", Toast.LENGTH_SHORT).show()
+            handleRecordingFailure(context)
+        }
+    }
+
+    private fun getDetailedErrorMessage(errorCode: Int, cause: Throwable?): String {
+        val baseMessage = getErrorMessage(errorCode)
+        return if (cause != null) {
+            "$baseMessage (${cause.javaClass.simpleName}: ${cause.message})"
+        } else {
+            baseMessage
         }
     }
 
     private fun getErrorMessage(errorCode: Int): String {
         return when (errorCode) {
-            0 -> "Error en opciones de salida (Invalid Output Options)"
-            1 -> "Error en codificación de video"
-            2 -> "Error en mezcla de audio/video (Muxer Error)"
+            // Video Recording Error Codes (API Reference)
+            0 -> "Error en opciones de salida - Verifica permisos de almacenamiento"
+            1 -> "Error en codificación de video - Reintenta grabación"
+            2 -> "Error en mezcla de audio/video - Codec incompatible"
             3 -> "Límite de tamaño de archivo alcanzado"
-            4 -> "Error de audio o codec no soportado - Grabando sin audio"
+            4 -> "Error de audio o codec de audio no soportado"
             5 -> "Límite de tamaño de archivo alcanzado"
             6 -> "Límite de duración alcanzado"
             7 -> "Almacenamiento insuficiente disponible"
-            8 -> "Fuente de video inactiva"
-            9 -> "Audio deshabilitado por inactividad"
-            else -> "Error desconocido ($errorCode) - Verifica los logs para más detalles"
+            8 -> "Fuente de video inactiva - Reactivar cámara"
+            9 -> "Audio deshabilitado en configuración del sistema"
+
+            // Additional common errors
+            else -> {
+                when {
+                    errorCode < 0 -> "Error del sistema ($errorCode) - Contacta soporte"
+                    else -> "Error desconocido ($errorCode) - Verifica los logs"
+                }
+            }
         }
+    }
+
+    companion object {
+        private const val TAG = "CameraViewModel"
+        private const val VIDEO_RECORD_ERROR_AUDIO_CODEC = 4
     }
 }
