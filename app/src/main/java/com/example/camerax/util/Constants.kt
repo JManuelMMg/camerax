@@ -25,7 +25,7 @@ object AudioConfig {
 // ML Kit Configuration
 object MLKitConfig {
     const val QR_CODE_SCAN_THROTTLE_MS = 300L
-    const val OBJECT_DETECTION_THROTTLE_MS = 500L
+    const val OBJECT_DETECTION_THROTTLE_MS = 300L  // ✅ Actualizado: era 500L, ahora 300L (consistente con ObjectDetectionAnalyzer)
     const val MAX_DETECTION_CONFIDENCE = 0.5f
 }
 

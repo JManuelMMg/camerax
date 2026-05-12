@@ -29,10 +29,10 @@ class ObjectDetectionAnalyzer(
     // ✅ CORRECIÓN: Single-threaded executor para evitar congelamiento
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
-    // ✅ CORRECIÓN: Rate limiting - procesa solo 1 frame cada 800ms
+    // ✅ CORRECIÓN: Rate limiting - procesa solo 1 frame cada 300ms (optimizado para mejor fluidez)
     private var lastAnalysisTime = 0L
     private var lastDetectedObjects: List<DetectedObjectResult>? = null
-    private val ANALYSIS_INTERVAL_MS = 800L
+    private val ANALYSIS_INTERVAL_MS = 300L
 
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {

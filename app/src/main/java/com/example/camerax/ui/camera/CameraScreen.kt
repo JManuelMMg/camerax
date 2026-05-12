@@ -2,9 +2,12 @@ package com.example.camerax.ui.camera
 
 // ...existing imports...
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.Toast
 import androidx.camera.core.CameraSelector
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
@@ -28,6 +31,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -39,6 +43,9 @@ import com.example.camerax.analyzer.ObjectDetectionAnalyzer
 import com.example.camerax.analyzer.QrCodeAnalyzer
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -46,6 +53,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     var showGallery by remember { mutableStateOf(false) }
+    var lastQrLink by remember { mutableStateOf<String?>(null) }  // ✅ Rastrear el último enlace mostrado
 
     val permissionsState = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -56,6 +64,20 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
 
     LaunchedEffect(Unit) {
         permissionsState.launchMultiplePermissionRequest()
+    }
+
+    // ✅ MEJORADO: Detectar cuando se encuentra un enlace y mostrar diálogo
+    // Este efecto se dispara cuando cambia el estado del QR detectado
+    LaunchedEffect(state.detectedQrText, state.detectedQrIsLink) {
+        if (state.isQrMode && state.detectedQrText != null) {
+            Log.d("CameraScreen", "QR Detectado: ${state.detectedQrText}, es link: ${state.detectedQrIsLink}")
+            if (state.detectedQrIsLink) {
+                // Solo mostrar si es un enlace válido y es diferente al último mostrado
+                if (lastQrLink != state.detectedQrText) {
+                    lastQrLink = state.detectedQrText
+                }
+            }
+        }
     }
 
     Crossfade(targetState = showGallery, label = "ScreenTransition") { isGalleryVisible ->
@@ -71,6 +93,105 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 onOpenGallery = { showGallery = true }
             )
         }
+    }
+
+    // ✅ MEJORADO: Mostrar diálogo directo si se detecta un enlace QR
+    if (lastQrLink != null && state.isQrMode) {
+        val link = lastQrLink!!
+        AlertDialog(
+            onDismissRequest = {
+                lastQrLink = null
+                Log.d("CameraScreen", "Diálogo de QR cerrado por usuario")
+            },
+            title = {
+                Text(
+                    "🔗 Enlace Detectado en QR",
+                    color = Color(0xFF00BCD4),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Se encontró un enlace válido:",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        color = Color.Black.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            link,
+                            color = Color(0xFF00BCD4),
+                            modifier = Modifier.padding(12.dp),
+                            fontSize = 11.sp,
+                            maxLines = 3
+                        )
+                    }
+                    Text(
+                        "¿Deseas abrir este enlace?",
+                        fontSize = 12.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+             confirmButton = {
+                Button(
+                    onClick = {
+                        try {
+                            Log.d("CameraScreen", "Abriendo enlace: $link")
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(link))
+                            )
+                            lastQrLink = null
+                        } catch (e: Exception) {
+                            Log.e("CameraScreen", "Error al abrir enlace: ${e.message}", e)
+                            Toast.makeText(context, "❌ Error al abrir enlace", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00BCD4)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth(0.45f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Abrir",
+                        modifier = Modifier
+                            .size(18.dp)
+                            .padding(end = 8.dp),
+                        tint = Color.Black
+                    )
+                    Text("Abrir", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        lastQrLink = null
+                        Log.d("CameraScreen", "Enlace de QR cancelado")
+                    },
+                    modifier = Modifier.fillMaxWidth(0.45f)
+                ) {
+                    Text("Cancelar", color = Color.White)
+                }
+            },
+            containerColor = Color.Black.copy(alpha = 0.95f),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(0.9f)
+        )
     }
 }
 
@@ -147,19 +268,29 @@ fun CameraPreviewContent(
 
     LaunchedEffect(state.isQrMode, state.isObjectDetectionEnabled) {
         try {
-            // ✅ CORRECIÓN: Limpiar analizadores anteriores
+            // ✅ Liberar analizadores anteriores
             currentQrAnalyzer?.release()
             currentObjectAnalyzer?.release()
 
             if (state.isQrMode) {
-                val qrAnalyzer = QrCodeAnalyzer { viewModel.onQrDetected(it) }
+                val qrAnalyzer = QrCodeAnalyzer { result, isLink ->
+                    // ✅ Procesar en hilo de fondo para evitar bloqueos
+                    CoroutineScope(Dispatchers.Default).launch {
+                        viewModel.onQrDetected(result, isLink)
+                    }
+                }
                 currentQrAnalyzer = qrAnalyzer
                 controller.setImageAnalysisAnalyzer(
                     ContextCompat.getMainExecutor(context),
                     qrAnalyzer
                 )
             } else if (state.isObjectDetectionEnabled) {
-                val objectAnalyzer = ObjectDetectionAnalyzer { viewModel.onObjectsDetected(it) }
+                val objectAnalyzer = ObjectDetectionAnalyzer { objects ->
+                    // ✅ Procesar en hilo de fondo para evitar bloqueos
+                    CoroutineScope(Dispatchers.Default).launch {
+                        viewModel.onObjectsDetected(objects)
+                    }
+                }
                 currentObjectAnalyzer = objectAnalyzer
                 controller.setImageAnalysisAnalyzer(
                     ContextCompat.getMainExecutor(context),
@@ -300,4 +431,3 @@ fun CameraPreviewContent(
         )
     }
 }
-

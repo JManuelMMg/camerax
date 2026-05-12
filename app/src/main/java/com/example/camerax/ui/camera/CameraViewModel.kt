@@ -1,5 +1,6 @@
 package com.example.camerax.ui.camera
 
+import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.media.AudioManager
@@ -34,6 +35,7 @@ data class CameraState(
     val isObjectDetectionEnabled: Boolean = false,
     val lastCapturedUri: String? = null,
     val detectedQrText: String? = null,
+    val detectedQrIsLink: Boolean = false,  // ✅ Nuevo: indica si el QR es un enlace
     val detectedObjects: List<DetectedObjectResult> = emptyList()
 )
 
@@ -47,14 +49,21 @@ class CameraViewModel : ViewModel() {
         AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO
     private var recordingAttempts: Int = 0
 
-    // ✅ CORRECIÓN: Debounce para QR - evitar actualizaciones excesivas
+     // ✅ CORRECIÓN: Debounce para QR - evitar actualizaciones excesivas
     private var lastQrUpdateTime = 0L
     private var lastQrValue: String? = null
-    private val QR_UPDATE_INTERVAL_MS = 1000L
+    private val QR_UPDATE_INTERVAL_MS = 400L
 
     // ✅ CORRECIÓN: Debounce para objetos - evitar actualizaciones excesivas
     private var lastObjectsUpdateTime = 0L
-    private val OBJECTS_UPDATE_INTERVAL_MS = 1200L
+    private val OBJECTS_UPDATE_INTERVAL_MS = 400L
+
+    // ✅ Limpiar estado de QR después de mostrar diálogo
+    fun resetQrState() {
+        _state.update { it.copy(detectedQrText = null, detectedQrIsLink = false) }
+        lastQrValue = null
+        lastQrUpdateTime = 0L
+    }
 
     fun onFlipCamera() {
         _state.update {
@@ -94,8 +103,8 @@ class CameraViewModel : ViewModel() {
         }
     }
 
-    // ✅ CORRECIÓN: Debounce en QR detection
-    fun onQrDetected(text: String?) {
+     // ✅ CORRECIÓN: Debounce en QR detection
+    fun onQrDetected(text: String?, isLink: Boolean) {
         val currentTime = System.currentTimeMillis()
 
         // Evitar actualizaciones si es muy frecuente
@@ -110,7 +119,8 @@ class CameraViewModel : ViewModel() {
 
         lastQrUpdateTime = currentTime
         lastQrValue = text
-        _state.update { it.copy(detectedQrText = text) }
+        Log.d(TAG, "✅ QR Detectado - Texto: $text, Es Enlace: $isLink")
+        _state.update { it.copy(detectedQrText = text, detectedQrIsLink = isLink) }
     }
 
     // ✅ CORRECIÓN: Debounce en object detection
@@ -241,6 +251,7 @@ class CameraViewModel : ViewModel() {
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun createAudioConfig(strategy: AudioConfigUtils.AudioFallbackStrategy): AudioConfig {
         return when (strategy) {
             AudioConfigUtils.AudioFallbackStrategy.WITH_AUDIO -> {
